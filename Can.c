@@ -8,19 +8,6 @@
 #include "Can.h"
 
 
-/*! CAN message buffer CODE for Rx buffers. */
-enum _flexcan_mb_code_rx
-{
-    kCAN_RxMbInactive = 0x0, /*!< MB is not active.*/
-    kCAN_RxMbFull = 0x2, /*!< MB is full.*/
-    kCAN_RxMbEmpty = 0x4, /*!< MB is active and empty.*/
-    kCAN_RxMbOverrun = 0x6, /*!< MB is overwritten into a full buffer.*/
-    kCAN_RxMbBusy = 0x8, /*!< CAN is updating the contents of the MB, The CPU must not access the MB.*/
-    kCAN_RxMbRanswer = 0xA, /*!< A frame was configured to recognize a Remote Request Frame and transmit a Response Frame in return.*/
-    kCAN_RxMbNotUsed = 0xF,  /*!< Not used.*/
-};
-
-
 /*!
  * Get the CAN instance from peripheral base address.
  *
@@ -457,16 +444,6 @@ void CAN_SetRxMbConfig(CAN_Type *base, uint8_t mbIdx, const can_rx_mb_config_t *
         base->MB[mbIdx].CS = cs_temp;
     }
 }
-
-
-enum _can_mb_code_tx {
-    kCAN_TxMbInactive     = 0x8, /*!< MB is not active.*/
-    kCAN_TxMbAbort        = 0x9, /*!< MB is aborted.*/
-    kCAN_TxMbDataOrRemote = 0xC, /*!< MB is a TX Data Frame(when MB RTR = 0) or MB is a TX Remote Request
-                                      Frame (when MB RTR = 1).*/
-    kCAN_TxMbTanswer = 0xE,      /*!< MB is a TX Response Request Frame from an incoming Remote Request Frame.*/
-    kCAN_TxMbNotUsed = 0xF,      /*!< Not used.*/
-};
 
 
 /*!
