@@ -91,10 +91,10 @@ void CAN_SetTxMbConfig(
 	uint8_t mbIdx,
 	bool enable
 );
-status_t CAN_TransferSendBlocking(
+status_t CAN_Write(
 	CAN_Type *base,
 	uint8_t mbIdx,
-	Can_PduType *pTxFrame
+	const Can_PduType *pTxFrame
 );
 bool CAN_CalculateImprovedTimingValues(
 	CAN_Type *base,
@@ -111,8 +111,6 @@ static void CAN_GetSegments(
 void Can_Init(
 	const Can_ConfigType* Config
 );
-//void Can_MainFunction_Read(void);
-//void Can_MainFunction_Write(void);
 
 
 /*!
@@ -134,6 +132,7 @@ static inline void CAN_ClearMbStatusFlags(CAN_Type *base, uint32_t mask)
     base->IFLAG1 = mask;
 #endif
 }
+
 
 /*!
  * This function gets the interrupt flags of a given Message Buffers.
