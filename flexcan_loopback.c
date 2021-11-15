@@ -23,8 +23,9 @@
 /*******************************************************************************
  * Prototypes
  ******************************************************************************/
-
-// void EXAMPLE_FLEXCAN_IRQHandler(void);
+void EXAMPLE_FLEXCAN_IRQHandler(void);
+status_t CAN_TransferSendBlocking(Can_PduType *pTxFrame);
+void Can_MainFunction_Write(void);
 
 /*******************************************************************************
  * Variables
@@ -55,6 +56,50 @@ void EXAMPLE_FLEXCAN_IRQHandler(void)
         rxComplete = true;
     }
     SDK_ISR_EXIT_BARRIER;
+}
+
+
+/*!
+ * Performs a polling send transaction on the CAN bus.
+ *
+ * param pTxFrame Pointer to CAN message frame to be sent.
+ * retval kStatus_Success - Write Tx Message Buffer Successfully.
+ * retval kStatus_Fail    - Tx Message Buffer is currently in use.
+ */
+status_t CAN_TransferSendBlocking(Can_PduType *pTxFrame) {
+    status_t status;
+    /* Write Tx Message Buffer to initiate a data sending. */
+    if (kStatus_Success == CAN_Write(EXAMPLE_CAN, TX_MESSAGE_BUFFER_NUM, (const Can_PduType *)(uint32_t)pTxFrame)) {
+    	Can_MainFunction_Write();
+        /*After TX MB transferred success, update the Timestamp from MB[mbIdx].CS register*/
+        pTxFrame->timestamp = (uint16_t)((EXAMPLE_CAN->MB[TX_MESSAGE_BUFFER_NUM].CS & CAN_CS_TIME_STAMP_MASK) >> CAN_CS_TIME_STAMP_SHIFT);
+        status = kStatus_Success;
+    }
+    else {
+        status = kStatus_Fail;
+    }
+    /* Waiting for Message receive finish. */
+    while (!rxComplete) { }
+    return status;
+}
+
+
+void Can_MainFunction_Write() {
+	/* Wait until CAN Message send out. */
+#if (defined(FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER)) && (FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER > 0)
+	uint64_t u64flag = 1;
+	while (0U == CAN_GetMbStatusFlags(EXAMPLE_CAN, u64flag << TX_MESSAGE_BUFFER_NUM))
+#else
+	uint32_t u32flag = 1;
+	while (0U == CAN_GetMbStatusFlags(EXAMPLE_CAN, u32flag << TX_MESSAGE_BUFFER_NUM))
+#endif
+	{ }
+/* Clean Tx Message Buffer Flag. */
+#if (defined(FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER)) && (FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER > 0)
+	CAN_ClearMbStatusFlags(EXAMPLE_CAN, u64flag << TX_MESSAGE_BUFFER_NUM);
+#else
+	CAN_ClearMbStatusFlags(EXAMPLE_CAN, u32flag << TX_MESSAGE_BUFFER_NUM);
+#endif
 }
 
 
@@ -94,9 +139,10 @@ int main(void)
     LOG_INFO("tx word0 = 0x%x\r\n", txFrame.dataWord0);
     LOG_INFO("tx word1 = 0x%x\r\n", txFrame.dataWord1);
     /* Send data through Tx Message Buffer using polling function. */
-    (void)CAN_TransferSendBlocking(EXAMPLE_CAN, TX_MESSAGE_BUFFER_NUM, &txFrame);
-    /* Waiting for Message receive finish. */
-    while (!rxComplete) { }
+//    (void)CAN_TransferSendBlocking(EXAMPLE_CAN, TX_MESSAGE_BUFFER_NUM, &txFrame);
+    (void)CAN_TransferSendBlocking(&txFrame);
+//    /* Waiting for Message receive finish. */
+//    while (!rxComplete) { }
     LOG_INFO("\r\nReceived message from MB%d\r\n", RX_MESSAGE_BUFFER_NUM);
     LOG_INFO("rx word0 = 0x%x\r\n", rxFrame.dataWord0);
     LOG_INFO("rx word1 = 0x%x\r\n", rxFrame.dataWord1);
