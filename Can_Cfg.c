@@ -56,4 +56,3 @@ Can_ConfigType canConfig_autosar = {
     .timingConfig.rJumpwidth = 1
 #endif
 };
-
