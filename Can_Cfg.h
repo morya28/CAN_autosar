@@ -156,7 +156,6 @@ typedef struct _can_rx_mb_config {
     can_frame_type_t type;     /*!< CAN Frame Type(Data or Remote). */
 } can_rx_mb_config_t;
 
-
 extern Can_ConfigType canConfig_autosar;
 
 #endif /* CAN_CFG_H_ */
