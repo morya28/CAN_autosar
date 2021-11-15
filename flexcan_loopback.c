@@ -26,6 +26,8 @@
 void EXAMPLE_FLEXCAN_IRQHandler(void);
 status_t CAN_TransferSendBlocking(Can_PduType *pTxFrame);
 void Can_MainFunction_Write(void);
+void Can_MainFunction_Read(void);
+void print_rxFrame(Can_PduType rxFrame);
 
 /*******************************************************************************
  * Variables
@@ -71,7 +73,7 @@ status_t CAN_TransferSendBlocking(Can_PduType *pTxFrame) {
     /* Write Tx Message Buffer to initiate a data sending. */
     if (kStatus_Success == CAN_Write(EXAMPLE_CAN, TX_MESSAGE_BUFFER_NUM, (const Can_PduType *)(uint32_t)pTxFrame)) {
     	Can_MainFunction_Write();
-        /*After TX MB transferred success, update the Timestamp from MB[mbIdx].CS register*/
+        /* After TX MB transferred success, update the Timestamp from MB[TX_MESSAGE_BUFFER_NUM].CS register */
         pTxFrame->timestamp = (uint16_t)((EXAMPLE_CAN->MB[TX_MESSAGE_BUFFER_NUM].CS & CAN_CS_TIME_STAMP_MASK) >> CAN_CS_TIME_STAMP_SHIFT);
         status = kStatus_Success;
     }
@@ -103,8 +105,68 @@ void Can_MainFunction_Write() {
 }
 
 
-int main(void)
-{
+void Can_MainFunction_Read() {
+	/* Assertion. */
+	assert(TX_MESSAGE_BUFFER_NUM <= (EXAMPLE_CAN->MCR & CAN_MCR_MAXMB_MASK));
+	uint32_t cs_temp;
+	uint32_t rx_code;
+	status_t status;
+	/* Read CS field of Rx Message Buffer to lock Message Buffer. */
+	cs_temp = EXAMPLE_CAN->MB[TX_MESSAGE_BUFFER_NUM].CS;
+	/* Get Rx Message Buffer Code field. */
+	rx_code = (cs_temp & CAN_CS_CODE_MASK) >> CAN_CS_CODE_SHIFT;
+	/* Check to see if Rx Message Buffer is full. */
+	if (CAN_CS_CODE(kCAN_TxMbDataOrRemote) != (cs_temp & CAN_CS_CODE_MASK)) {
+		/* Store Message ID. */
+		rxFrame.id = EXAMPLE_CAN->MB[TX_MESSAGE_BUFFER_NUM].ID & (CAN_ID_EXT_MASK | CAN_ID_STD_MASK);
+		/* Get the message ID and format. */
+		rxFrame.format = (cs_temp & CAN_CS_IDE_MASK) != 0U ? (uint8_t)kFLEXCAN_FrameFormatExtend :
+															 (uint8_t)kFLEXCAN_FrameFormatStandard;
+		/* Get the message type. */
+		rxFrame.type = (cs_temp & CAN_CS_RTR_MASK) != 0U ? (uint8_t)kFLEXCAN_FrameTypeRemote : (uint8_t)kFLEXCAN_FrameTypeData;
+		/* Get the message length. */
+		rxFrame.length = (uint8_t)((cs_temp & CAN_CS_DLC_MASK) >> CAN_CS_DLC_SHIFT);
+		/* Get the time stamp. */
+		rxFrame.timestamp = (uint16_t)((cs_temp & CAN_CS_TIME_STAMP_MASK) >> CAN_CS_TIME_STAMP_SHIFT);
+		/* Store Message Payload. */
+		rxFrame.dataWord0 = EXAMPLE_CAN->MB[TX_MESSAGE_BUFFER_NUM].WORD0;
+		rxFrame.dataWord1 = EXAMPLE_CAN->MB[TX_MESSAGE_BUFFER_NUM].WORD1;
+		/* Read free-running timer to unlock Rx Message Buffer. */
+		(void)EXAMPLE_CAN->TIMER;
+		if ((uint32_t)kCAN_RxMbFull == rx_code) {
+			status = kStatus_Success;
+		}
+		else {
+			status = kStatus_FLEXCAN_RxOverflow;
+		}
+		print_rxFrame(rxFrame);
+	}
+	else {
+		/* Read free-running timer to unlock Rx Message Buffer. */
+		(void)EXAMPLE_CAN->TIMER;
+		status = kStatus_Fail;
+	}
+	LOG_INFO("rx status = %d\r\n", status);
+}
+
+void print_rxFrame(Can_PduType frame) {
+	/* Store Message ID. */
+	LOG_INFO("\r\nRead frame status = %d\r\n", frame.id);
+	/* Get the message ID and format. */
+	LOG_INFO("Read frame format = %d\r\n", frame.format);
+	/* Get the message type. */
+	LOG_INFO("Read frame type = %d\r\n", frame.type);
+	/* Get the message length. */
+	LOG_INFO("Read frame length = %d\r\n", frame.length);
+	/* Get the time stamp. */
+	LOG_INFO("Read frame timestamp = %d\r\n", frame.timestamp);
+	/* Store Message Payload. */
+	LOG_INFO("Read frame dataWord0 = 0x%x\r\n", frame.dataWord0);
+	LOG_INFO("Read frame dataWord1 = 0x%x\r\n", frame.dataWord1);
+}
+
+
+int main(void) {
     can_rx_mb_config_t mbConfig;
 #if (defined(FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER)) && (FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER > 0)
     uint64_t flag = 1U;
@@ -139,13 +201,12 @@ int main(void)
     LOG_INFO("tx word0 = 0x%x\r\n", txFrame.dataWord0);
     LOG_INFO("tx word1 = 0x%x\r\n", txFrame.dataWord1);
     /* Send data through Tx Message Buffer using polling function. */
-//    (void)CAN_TransferSendBlocking(EXAMPLE_CAN, TX_MESSAGE_BUFFER_NUM, &txFrame);
     (void)CAN_TransferSendBlocking(&txFrame);
-//    /* Waiting for Message receive finish. */
-//    while (!rxComplete) { }
     LOG_INFO("\r\nReceived message from MB%d\r\n", RX_MESSAGE_BUFFER_NUM);
     LOG_INFO("rx word0 = 0x%x\r\n", rxFrame.dataWord0);
     LOG_INFO("rx word1 = 0x%x\r\n", rxFrame.dataWord1);
+
+    Can_MainFunction_Read();
     /* Stop CAN Send & Receive. */
     CAN_DisableMbInterrupts(EXAMPLE_CAN, flag << RX_MESSAGE_BUFFER_NUM);
     LOG_INFO("CAN loopback functional example -- Finish.\r\n");
