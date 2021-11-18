@@ -7,6 +7,9 @@
 
 #include "Can.h"
 
+volatile bool rxComplete = false;
+Can_PduType rxFrame;
+
 
 /*!
  * Get the CAN instance from peripheral base address.
@@ -14,7 +17,7 @@
  * base: CAN peripheral base address.
  * return: CAN instance.
  */
-uint32_t CAN_GetInstance(CAN_Type *base) {
+static uint32_t CAN_GetInstance(CAN_Type *base) {
     uint32_t instance;
     /* Find the instance index from base address mappings. */
     for (instance = 0; instance < ARRAY_SIZE(s_flexcanBases); instance++) {
@@ -98,7 +101,7 @@ static void CAN_SetBitRate(CAN_Type *base, uint32_t sourceClock_Hz, uint32_t bit
  *
  * base: CAN peripheral base address.
  */
-void CAN_ExitFreezeMode(CAN_Type *base) {
+static void CAN_ExitFreezeMode(CAN_Type *base) {
 #if (defined(FSL_FEATURE_FLEXCAN_HAS_MEMORY_ERROR_CONTROL) && FSL_FEATURE_FLEXCAN_HAS_MEMORY_ERROR_CONTROL)
     /* Clean FlexCAN Access With Non-Correctable Error Interrupt Flag to avoid be put in freeze mode. */
     FLEXCAN_ClearStatusFlags(base, (uint64_t)kFLEXCAN_FlexCanAccessNonCorrectableErrorIntFlag |
@@ -118,7 +121,7 @@ void CAN_ExitFreezeMode(CAN_Type *base) {
  * base: CAN peripheral base address.
  */
 #if (defined(FSL_FEATURE_FLEXCAN_HAS_ERRATA_9595) && FSL_FEATURE_FLEXCAN_HAS_ERRATA_9595)
-void CAN_EnterFreezeMode(CAN_Type *base) {
+static void CAN_EnterFreezeMode(CAN_Type *base) {
     uint32_t u32TimeoutCount = 0U;
     uint32_t u32TempMCR      = 0U;
     uint32_t u32TempIMASK1   = 0U;
@@ -177,7 +180,7 @@ void CAN_EnterFreezeMode(CAN_Type *base) {
     }
 }
 #elif (defined(FSL_FEATURE_FLEXCAN_HAS_ERRATA_8341) && FSL_FEATURE_FLEXCAN_HAS_ERRATA_8341)
-void CAN_EnterFreezeMode(CAN_Type *base)
+static void CAN_EnterFreezeMode(CAN_Type *base)
 {
     uint32_t u32TimeoutCount = 0U;
     uint32_t u32TempMCR      = 0U;
@@ -219,7 +222,7 @@ void CAN_EnterFreezeMode(CAN_Type *base)
     }
 }
 #else
-void CAN_EnterFreezeMode(CAN_Type *base) {
+static void CAN_EnterFreezeMode(CAN_Type *base) {
     /* Set Freeze, Halt bits. */
     base->MCR |= CAN_MCR_FRZ_MASK;
     base->MCR |= CAN_MCR_HALT_MASK;
@@ -234,7 +237,7 @@ void CAN_EnterFreezeMode(CAN_Type *base) {
  * base: CAN peripheral base address.
  * pConfig: Pointer to the timing configuration structure.
  */
-void CAN_SetTimingConfig(CAN_Type *base, const can_timing_config_t *pConfig) {
+static void CAN_SetTimingConfig(CAN_Type *base, const can_timing_config_t *pConfig) {
     /* Assertion. */
     assert(NULL != pConfig);
     /* Enter Freeze Mode. */
@@ -414,7 +417,7 @@ static bool CAN_IsMbOccupied(CAN_Type *base, uint8_t mbIdx) {
  * param pRxMbConfig Pointer to the CAN Message Buffer configuration structure.
  * param enable Enable/disable Rx Message Buffer.
  */
-void CAN_SetRxMbConfig(CAN_Type *base, uint8_t mbIdx, const can_rx_mb_config_t *pRxMbConfig, bool enable) {
+static void CAN_SetRxMbConfig(CAN_Type *base, uint8_t mbIdx, const can_rx_mb_config_t *pRxMbConfig, bool enable) {
     /* Assertion. */
     assert(mbIdx <= (base->MCR & CAN_MCR_MAXMB_MASK));
     assert(((NULL != pRxMbConfig) || (false == enable)));
@@ -456,7 +459,7 @@ void CAN_SetRxMbConfig(CAN_Type *base, uint8_t mbIdx, const can_rx_mb_config_t *
  *  - true: Enable Tx Message Buffer.
  *  - false: Disable Tx Message Buffer.
  */
-void CAN_SetTxMbConfig(CAN_Type *base, uint8_t mbIdx, bool enable) {
+static void CAN_SetTxMbConfig(CAN_Type *base, uint8_t mbIdx, bool enable) {
     /* Assertion. */
     assert(mbIdx <= (base->MCR & CAN_MCR_MAXMB_MASK));
 #if !defined(NDEBUG)
@@ -489,39 +492,31 @@ void CAN_SetTxMbConfig(CAN_Type *base, uint8_t mbIdx, bool enable) {
  * retval kStatus_Success - Write Tx Message Buffer Successfully.
  * retval kStatus_Fail - Tx Message Buffer is currently in use.
  */
-status_t CAN_Write(CAN_Type *base, uint8_t mbIdx, const Can_PduType *pTxFrame) {
+status_t CAN_Write(CAN_Type *base, const Can_PduType *canPdu) {
     /* Assertion. */
-    assert(mbIdx <= (base->MCR & CAN_MCR_MAXMB_MASK));
-    assert(NULL != pTxFrame);
-    assert(pTxFrame->length <= 8U);
+    assert(canPdu->pdu_handle.mbIdx <= (base->MCR & CAN_MCR_MAXMB_MASK));
+    assert(NULL != canPdu);
+    assert(canPdu->length <= 8U);
 #if !defined(NDEBUG)
-    assert(!CAN_IsMbOccupied(base, mbIdx));
+    assert(!CAN_IsMbOccupied(base, canPdu->pdu_handle.mbIdx));
 #endif
     uint32_t cs_temp = 0;
     status_t status;
 #if (defined(FSL_FEATURE_FLEXCAN_HAS_ERRATA_6032) && FSL_FEATURE_FLEXCAN_HAS_ERRATA_6032)
-    FLEXCAN_ERRATA_6032(base, &(base->MB[mbIdx].CS));
+    FLEXCAN_ERRATA_6032(base, &(base->MB[canPdu->pdu_handle->mbIdx].CS));
 #endif
     /* Check if Message Buffer is available. */
-    if (CAN_CS_CODE(kCAN_TxMbDataOrRemote) != (base->MB[mbIdx].CS & CAN_CS_CODE_MASK)) {
+    if (CAN_CS_CODE(kCAN_TxMbDataOrRemote) != (base->MB[canPdu->pdu_handle.mbIdx].CS & CAN_CS_CODE_MASK)) {
         /* Inactive Tx Message Buffer. */
-        base->MB[mbIdx].CS = (base->MB[mbIdx].CS & ~CAN_CS_CODE_MASK) | CAN_CS_CODE(kCAN_TxMbInactive);
+        base->MB[canPdu->pdu_handle.mbIdx].CS = (base->MB[canPdu->pdu_handle.mbIdx].CS & ~CAN_CS_CODE_MASK) | CAN_CS_CODE(kCAN_TxMbInactive);
         /* Fill Message ID field. */
-        base->MB[mbIdx].ID = pTxFrame->id;
-        /* Fill Message Format field. */
-        if ((uint32_t)kCAN_FrameFormatExtend == pTxFrame->format) {
-            cs_temp |= CAN_CS_SRR_MASK | CAN_CS_IDE_MASK;
-        }
-        /* Fill Message Type field. */
-        if ((uint32_t)kCAN_FrameTypeRemote == pTxFrame->type) {
-            cs_temp |= CAN_CS_RTR_MASK;
-        }
-        cs_temp |= CAN_CS_CODE(kCAN_TxMbDataOrRemote) | CAN_CS_DLC(pTxFrame->length);
+        base->MB[canPdu->pdu_handle.mbIdx].ID = canPdu->id;
+        cs_temp |= CAN_CS_CODE(kCAN_TxMbDataOrRemote) | CAN_CS_DLC(canPdu->length);
         /* Load Message Payload. */
-        base->MB[mbIdx].WORD0 = pTxFrame->dataWord0;
-        base->MB[mbIdx].WORD1 = pTxFrame->dataWord1;
+        base->MB[canPdu->pdu_handle.mbIdx].WORD0 = canPdu->sdu.dataWord0;
+        base->MB[canPdu->pdu_handle.mbIdx].WORD1 = canPdu->sdu.dataWord1;
         /* Activate Tx Message Buffer. */
-        base->MB[mbIdx].CS = cs_temp;
+        base->MB[canPdu->pdu_handle.mbIdx].CS = cs_temp;
 #if ((defined(FSL_FEATURE_FLEXCAN_HAS_ERRATA_5641) && FSL_FEATURE_FLEXCAN_HAS_ERRATA_5641) || \
      (defined(FSL_FEATURE_FLEXCAN_HAS_ERRATA_5829) && FSL_FEATURE_FLEXCAN_HAS_ERRATA_5829))
         base->MB[FLEXCAN_GetFirstValidMb(base)].CS = CAN_CS_CODE(kFLEXCAN_TxMbInactive);
@@ -530,7 +525,6 @@ status_t CAN_Write(CAN_Type *base, uint8_t mbIdx, const Can_PduType *pTxFrame) {
         status = kStatus_Success;
     }
     else {
-        /* Tx Message Buffer is activated, return immediately. */
         status = kStatus_Fail;
     }
     return status;
@@ -549,7 +543,7 @@ status_t CAN_Write(CAN_Type *base, uint8_t mbIdx, const Can_PduType *pTxFrame) {
  *
  * return TRUE if timing configuration found, FALSE if failed to find configuration.
  */
-bool CAN_CalculateImprovedTimingValues(CAN_Type *base, uint32_t bitRate, uint32_t sourceClock_Hz,
+static bool CAN_CalculateImprovedTimingValues(CAN_Type *base, uint32_t bitRate, uint32_t sourceClock_Hz,
                                        can_timing_config_t *pTimingConfig) {
     /* Observe bit rate maximums. */
     assert(bitRate <= MAX_CAN_BITRATE);
@@ -817,4 +811,90 @@ void Can_Init(const Can_ConfigType *pConfig) {
     pConfig->CAN_base->MCR = mcrTemp;
     /* Bit Rate Configuration.*/
     CAN_SetBitRate(pConfig->CAN_base, pConfig->CAN_clock_freq(kCLOCK_BusClk), pConfig->bitRate, pConfig->timingConfig);
+
+    /* Set receiving and transmission message buffer */
+    /* Setup Rx Message Buffer. */
+    can_rx_mb_config_t mbConfig;
+#if (defined(FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER)) && (FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER > 0)
+    uint64_t flag = 1U;
+#else
+    uint32_t flag = 1U;
+#endif
+    mbConfig.format = kCAN_FrameFormatStandard;
+	mbConfig.type = kCAN_FrameTypeData;
+	mbConfig.id = CAN_ID_STD(0x123);
+	CAN_SetRxMbConfig(EXAMPLE_CAN, RX_MESSAGE_BUFFER_NUM, &mbConfig, true);
+	/* Setup Tx Message Buffer. */
+	CAN_SetTxMbConfig(EXAMPLE_CAN, TX_MESSAGE_BUFFER_NUM, true);
+	CAN_EnableMbInterrupts(EXAMPLE_CAN, flag << RX_MESSAGE_BUFFER_NUM);
+	(void)EnableIRQ(EXAMPLE_FLEXCAN_IRQn);
+}
+
+
+void Can_MainFunction_Write() {
+	/* Wait until CAN Message send out. */
+#if (defined(FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER)) && (FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER > 0)
+	uint64_t u64flag = 1;
+	while (0U == CAN_GetMbStatusFlags(EXAMPLE_CAN, u64flag << TX_MESSAGE_BUFFER_NUM))
+#else
+	uint32_t u32flag = 1;
+	while (0U == CAN_GetMbStatusFlags(EXAMPLE_CAN, u32flag << TX_MESSAGE_BUFFER_NUM))
+#endif
+	{ }
+/* Clean Tx Message Buffer Flag. */
+#if (defined(FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER)) && (FSL_FEATURE_FLEXCAN_HAS_EXTENDED_FLAG_REGISTER > 0)
+	CAN_ClearMbStatusFlags(EXAMPLE_CAN, u64flag << TX_MESSAGE_BUFFER_NUM);
+#else
+	CAN_ClearMbStatusFlags(EXAMPLE_CAN, u32flag << TX_MESSAGE_BUFFER_NUM);
+#endif
+}
+
+
+void Can_MainFunction_Read() {
+	while (!rxComplete) { }
+	/* Assertion. */
+	assert(RX_MESSAGE_BUFFER_NUM <= (EXAMPLE_CAN->MCR & CAN_MCR_MAXMB_MASK));
+	uint32_t cs_temp;
+	uint32_t rx_code;
+	status_t status;
+	/* Read CS field of Rx Message Buffer to lock Message Buffer. */
+	cs_temp = EXAMPLE_CAN->MB[RX_MESSAGE_BUFFER_NUM].CS;
+	/* Get Rx Message Buffer Code field. */
+	rx_code = (cs_temp & CAN_CS_CODE_MASK) >> CAN_CS_CODE_SHIFT;
+	/* Check to see if Rx Message Buffer is full. */
+	if (CAN_CS_CODE(kCAN_TxMbDataOrRemote) != (cs_temp & CAN_CS_CODE_MASK)) {
+		/* Store Message ID. */
+		rxFrame.id = EXAMPLE_CAN->MB[RX_MESSAGE_BUFFER_NUM].ID & (CAN_ID_EXT_MASK | CAN_ID_STD_MASK);
+		/* Get the message length. */
+		rxFrame.length = (uint8_t)((cs_temp & CAN_CS_DLC_MASK) >> CAN_CS_DLC_SHIFT);
+		/* Store Message Payload. */
+		rxFrame.sdu.dataWord0 = EXAMPLE_CAN->MB[RX_MESSAGE_BUFFER_NUM].WORD0;
+		rxFrame.sdu.dataWord1 = EXAMPLE_CAN->MB[RX_MESSAGE_BUFFER_NUM].WORD1;
+		/* Read free-running timer to unlock Rx Message Buffer. */
+		(void)EXAMPLE_CAN->TIMER;
+		if ((uint32_t)kCAN_RxMbFull == rx_code) {
+			status = kStatus_Success;
+		}
+		else {
+			status = kStatus_CAN_RxOverflow;
+		}
+		print_rxFrame(rxFrame);
+	}
+	else {
+		/* Read free-running timer to unlock Rx Message Buffer. */
+		(void)EXAMPLE_CAN->TIMER;
+		status = kStatus_Fail;
+	}
+	LOG_INFO("rx status = %d\r\n", status);
+}
+
+
+static void print_rxFrame(Can_PduType CanPdu) {
+	/* Store Message ID. */
+	LOG_INFO("\r\nRead frame status = %d\r\n", CanPdu.id);
+	/* Get the message length. */
+	LOG_INFO("Read frame length = %d\r\n", CanPdu.length);
+	/* Store Message Payload. */
+	LOG_INFO("Read frame dataWord0 = 0x%x\r\n", CanPdu.sdu.dataWord0);
+	LOG_INFO("Read frame dataWord1 = 0x%x\r\n", CanPdu.sdu.dataWord1);
 }
