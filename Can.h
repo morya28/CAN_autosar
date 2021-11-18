@@ -10,8 +10,13 @@
 
 #include "assert.h"
 #include "stddef.h"
+#include "fsl_debug_console.h"
 #include "Can_Cfg.h"
 
+extern volatile bool rxComplete;
+extern Can_PduType rxFrame;
+
+#define LOG_INFO (void)PRINTF
 
 #if !(defined(FSL_SDK_DISABLE_DRIVER_CLOCK_CONTROL) && FSL_SDK_DISABLE_DRIVER_CLOCK_CONTROL)
 #ifndef CAN_CLOCK_CHECK_NO_AFFECTS
@@ -77,8 +82,33 @@ enum _can_mb_code_tx {
 };
 
 
+/*! @brief FlexCAN transfer status. */
+enum
+{
+    kStatus_CAN_TxBusy       = MAKE_STATUS(kStatusGroup_FLEXCAN, 0), /*!< Tx Message Buffer is Busy. */
+    kStatus_CAN_TxIdle       = MAKE_STATUS(kStatusGroup_FLEXCAN, 1), /*!< Tx Message Buffer is Idle. */
+    kStatus_CAN_TxSwitchToRx = MAKE_STATUS(
+        kStatusGroup_FLEXCAN, 2), /*!< Remote Message is send out and Message buffer changed to Receive one. */
+    kStatus_CAN_RxBusy         = MAKE_STATUS(kStatusGroup_FLEXCAN, 3), /*!< Rx Message Buffer is Busy. */
+    kStatus_CAN_RxIdle         = MAKE_STATUS(kStatusGroup_FLEXCAN, 4), /*!< Rx Message Buffer is Idle. */
+    kStatus_CAN_RxOverflow     = MAKE_STATUS(kStatusGroup_FLEXCAN, 5), /*!< Rx Message Buffer is Overflowed. */
+    kStatus_CAN_RxFifoBusy     = MAKE_STATUS(kStatusGroup_FLEXCAN, 6), /*!< Rx Message FIFO is Busy. */
+    kStatus_CAN_RxFifoIdle     = MAKE_STATUS(kStatusGroup_FLEXCAN, 7), /*!< Rx Message FIFO is Idle. */
+    kStatus_CAN_RxFifoOverflow = MAKE_STATUS(kStatusGroup_FLEXCAN, 8), /*!< Rx Message FIFO is overflowed. */
+    kStatus_CAN_RxFifoWarning  = MAKE_STATUS(kStatusGroup_FLEXCAN, 9), /*!< Rx Message FIFO is almost overflowed. */
+    kStatus_CAN_ErrorStatus    = MAKE_STATUS(kStatusGroup_FLEXCAN, 10), /*!< FlexCAN Module Error and Status. */
+    kStatus_CAN_WakeUp         = MAKE_STATUS(kStatusGroup_FLEXCAN, 11), /*!< FlexCAN is waken up from STOP mode. */
+    kStatus_CAN_UnHandled      = MAKE_STATUS(kStatusGroup_FLEXCAN, 12), /*!< UnHadled Interrupt asserted. */
+    kStatus_CAN_RxRemote = MAKE_STATUS(kStatusGroup_FLEXCAN, 13), /*!< Rx Remote Message Received in Mail box. */
+#if (defined(FSL_FEATURE_FLEXCAN_HAS_ENHANCED_RX_FIFO) && FSL_FEATURE_FLEXCAN_HAS_ENHANCED_RX_FIFO)
+    kStatus_FLEXCAN_RxFifoUnderflow =
+        MAKE_STATUS(kStatusGroup_FLEXCAN, 14), /*!< Enhanced Rx Message FIFO is underflow. */
+#endif
+};
+
+
 // Function prototypes
-uint32_t CAN_GetInstance(
+static uint32_t CAN_GetInstance(
 	CAN_Type *base
 );
 static inline void CAN_Enable(
@@ -90,36 +120,35 @@ static void CAN_SetBitRate(
 	uint32_t bitRate_Bps,
 	can_timing_config_t timingConfig
 );
-void CAN_ExitFreezeMode(
+static void CAN_ExitFreezeMode(
 	CAN_Type *base
 );
-void CAN_EnterFreezeMode(
+static void CAN_EnterFreezeMode(
 	CAN_Type *base
 );
-void CAN_SetTimingConfig(
+static void CAN_SetTimingConfig(
 	CAN_Type *base,
 	const can_timing_config_t *pConfig
 );
 static void CAN_Reset(
 	CAN_Type *base
 );
-void CAN_SetRxMbConfig(
+static void CAN_SetRxMbConfig(
 	CAN_Type *base,
 	uint8_t mbIdx,
 	const can_rx_mb_config_t *pRxMbConfig,
 	bool enable
 );
-void CAN_SetTxMbConfig(
+static void CAN_SetTxMbConfig(
 	CAN_Type *base,
 	uint8_t mbIdx,
 	bool enable
 );
 status_t CAN_Write(
 	CAN_Type *base,
-	uint8_t mbIdx,
-	const Can_PduType *pTxFrame
+	const Can_PduType *canPdu
 );
-bool CAN_CalculateImprovedTimingValues(
+static bool CAN_CalculateImprovedTimingValues(
 	CAN_Type *base,
 	uint32_t bitRate,
 	uint32_t sourceClock_Hz,
@@ -134,6 +163,9 @@ static void CAN_GetSegments(
 void Can_Init(
 	const Can_ConfigType* Config
 );
+void Can_MainFunction_Write(void);
+void Can_MainFunction_Read(void);
+static void print_rxFrame(Can_PduType rxFrame);
 
 
 /*!
