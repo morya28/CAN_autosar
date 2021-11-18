@@ -103,14 +103,10 @@ typedef struct _flexcan_config_autosar {
 
 /*! CAN message frame structure. */
 typedef struct _can_PduType {
-    struct {
-        uint32_t timestamp : 16; /*!< FlexCAN internal Free-Running Counter Time Stamp. */
-        uint32_t length : 4;     /*!< CAN frame data length in bytes (Range: 0~8). */
-        uint32_t type : 1;       /*!< CAN Frame Type(DATA or REMOTE). */
-        uint32_t format : 1;     /*!< CAN Frame Identifier(STD or EXT format). */
-        uint32_t : 1;            /*!< Reserved. */
-        uint32_t idhit : 9;      /*!< CAN Rx FIFO filter hit id(This value is only used in Rx FIFO receive mode). */
-    };
+	struct PduIdType{
+		uint8_t mbIdx;
+	} pdu_handle;
+	uint32_t length : 4;     /*!< CAN frame data length in bytes (Range: 0~8). */
     struct {
         uint32_t id : 29; /*!< CAN Frame Identifier, should be set using FLEXCAN_ID_EXT() or FLEXCAN_ID_STD() macro. */
         uint32_t : 3;     /*!< Reserved. */
@@ -130,7 +126,7 @@ typedef struct _can_PduType {
             uint8_t dataByte5; /*!< CAN Frame payload byte5. */
             uint8_t dataByte4; /*!< CAN Frame payload byte4. */
         };
-    };
+    } sdu;
 } Can_PduType;
 
 typedef enum _can_frame_format {
